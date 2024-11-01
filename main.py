@@ -1,43 +1,28 @@
-import pandas as pd
-from modules.preprocess import preprocess_text, tokenize_and_pad
-from modules.model import create_dnn_model
-from modules.train import train_model, plot_training_history
+from preprocessing import load_data, preprocess_text, encode_labels, tokenize_pad_sequences
+from model import load_embedding_matrix, build_model
+from training import train_model, evaluate_model, prepare_submission
 
-# Load the data
-train_data = pd.read_json('data/train.json')
-test_data = pd.read_json('data/test.json')
+# Load and preprocess data
+train_data, test_data = load_data()
+train_data, label_encoder = encode_labels(train_data)
 
-# Preprocess the data
-train_data['clean_text'] = train_data['text'].apply(preprocess_text)
-train_data['clean_title'] = train_data['title'].apply(preprocess_text)
-train_data['combined_text'] = train_data['clean_title'] + ' ' + train_data['clean_text']
-
-test_data['clean_text'] = test_data['text'].apply(preprocess_text)
-test_data['clean_title'] = test_data['title'].apply(preprocess_text)
-test_data['combined_text'] = test_data['clean_title'] + ' ' + test_data['clean_text']
+# Split data
+X = train_data['full_text']
+y = train_data['rating']
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
 # Tokenize and pad sequences
-X_train_padded, tokenizer = tokenize_and_pad(train_data['combined_text'])
-X_test_padded, _ = tokenize_and_pad(test_data['combined_text'])
+X_train_pad, X_val_pad, X_test_pad, tokenizer = tokenize_pad_sequences(X_train, X_val, test_data['full_text'])
 
-# Prepare the labels
-y_train = train_data['rating'] - 1  # Convert to 0-4 range
+# Load embedding matrix
+embedding_matrix = load_embedding_matrix(tokenizer)
 
-# Create the DNN model
-vocab_size = 10000
-max_len = 100
-dnn_model = create_dnn_model(vocab_size, max_len)
+# Build and train model
+model = build_model(embedding_matrix)
+train_model(model, X_train_pad, y_train, X_val_pad, y_val)
 
-# Train the model
-history = train_model(dnn_model, X_train_padded, y_train, epochs=10, batch_size=32)
+# Evaluate model
+evaluate_model(model, X_val_pad, y_val)
 
-# Plot the training history
-plot_training_history(history)
-
-# Predict the test data
-y_pred = dnn_model.predict(X_test_padded)
-y_pred_classes = y_pred.argmax(axis=1) + 1  # Convert to 1-5 range
-
-# Create a submission file
-submission = pd.DataFrame({'index': test_data.index, 'rating': y_pred_classes})
-submission.to_csv('submission.csv', index=False)
+# Prepare submission
+prepare_submission(model, X_test_pad, test_data, label_encoder)
